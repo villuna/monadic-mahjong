@@ -1,6 +1,6 @@
 # Monadic Mahjong
 
-> "Mahjong cases great damage to the human spirit without a single benefit."
+> "Mahjong causes great damage to the human spirit without a single benefit."
 
 A Mahjong game written in Haskell. Currently I'm writing it as a CLI to get started, but I would like to give it a graphical interface with something like raylib.
 
