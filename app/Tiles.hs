@@ -1,7 +1,5 @@
 module Tiles where
 
-import Data.Array
-
 data Suit = Man | Pin | Sou deriving (Ord, Eq)
 
 data Colour = Red | Green | White deriving (Ord, Eq)
@@ -13,9 +11,14 @@ type Rank = Int
 -- TODO red 5?
 data Tile = Number Suit Rank | Dragon Colour | Wind Direction deriving (Ord, Eq)
 
-type Hand = Array Int Tile
+type Hand = [Tile]
 
 type Deck = [Tile]
+
+isTerminal :: Tile -> Bool
+isTerminal (Dragon _) = True
+isTerminal (Wind _) = True
+isTerminal (Number _ rank) = rank == 1 || rank == 9
 
 -- A standard mahjong deck. Not in random order.
 baseDeck :: Deck

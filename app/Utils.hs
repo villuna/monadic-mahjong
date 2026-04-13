@@ -1,8 +1,13 @@
 module Utils where
 
 import Control.Monad
+import Data.Array
 import Data.Array.IO
 import System.Random
+
+-- Wrapper for listArray, since I will never need arrays that are not zero indexed by Ints
+listToArray :: [a] -> Array Int a
+listToArray lst = listArray (0, length lst - 1) lst
 
 -- | Randomly shuffle a list
 -- Taken from https://wiki.haskell.org/Random_shuffle
