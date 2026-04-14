@@ -3,6 +3,7 @@ module Main where
 import Control.Monad
 import Control.Monad.State
 import Game
+import GameLoop
 
 main :: IO ()
 main = do

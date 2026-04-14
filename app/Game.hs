@@ -7,21 +7,45 @@ module Game where
 import Control.Lens
 import Control.Monad
 import Control.Monad.State
-import Data.Functor
 import Data.List
-import System.IO
-import Text.Parsec hiding (State)
 import Tiles
 import Utils
+
+-- A call is a set of tiles the player has put on the table separate from their hand. A chii is a
+-- run of 3 number tiles in sequence. Pon is 3 of a kind, and Kan is 4 of a kind. Kan can be open
+-- or closed, depending on whether the any of the tiles were stolen from another player.
+data Call = Call [Tile] CallType deriving (Show)
+
+callTiles :: Call -> [Tile]
+callTiles (Call tiles _) = tiles
+
+data CallType = Pon | Chii | OpenKan | ClosedKan deriving (Eq, Show)
+
+data PlayerState = PlayerState
+  { _hand :: [Tile],
+    _calls :: [Call]
+  }
+  deriving (Show)
 
 -- The state of the game at any given point in time
 data GameState = GameState
   { _deck :: Deck,
-    _hands :: [Hand]
+    _players :: [PlayerState]
   }
   deriving (Show)
 
+-- Types of moves the player can make on their turn
+-- Either the player can keep the new tile they picked up (discarding the old tile) or reject the
+-- tile and not pick it up.
+--
+-- I will add kan and riichi later on
+data Move = Keep Int | Reject deriving (Show)
+
 makeLenses ''GameState
+makeLenses ''PlayerState
+
+newPlayer :: [Tile] -> PlayerState
+newPlayer hand = PlayerState {_hand = hand, _calls = []}
 
 -- Draws a hand from the deck. State transformation where the deck is the state
 takeHand :: State Deck Hand
@@ -36,64 +60,71 @@ newGameState :: IO GameState
 newGameState = do
   shuffledDeck <- shuffle baseDeck
   let (hands, deck) = runState (replicateM 4 takeHand) shuffledDeck
-  return GameState {_deck = deck, _hands = hands}
+  return GameState {_deck = deck, _players = newPlayer <$> hands}
 
--- Types of moves the player can make on their turn
--- Either the player can keep the new tile they picked up (discarding the old tile) or reject the
--- tile and not pick it up.
+-- A Yaku is a condition on a hand which gives a certain number of han when satisfied
+-- the number of points may depend on the hand
 --
--- I will add kan and riichi later on
-data Move = Keep Int | Reject deriving (Show)
+-- If the function returns Nothing, the yaku is not satisfied. Otherwise returns the number of han
+-- the function satisfies.
+type Yaku = PlayerState -> Tile -> Maybe Int
 
-parsePlayerMove :: String -> Maybe Move
-parsePlayerMove move = case parse playerMove "" move of
-  Right m -> Just m
-  Left _ -> Nothing
+-- Returns if the player is in tenpai - i.e., the player is one tile away from making a hand.
+-- Returns a list of which tiles would complete the players hand.
+tenpai :: PlayerState -> [Tile]
+tenpai player = filter (isValidHand player) quarterDeck
+
+-- Returns whether the player can make a hand with the tiles they have plus the newly drawn tile.
+-- This does not mean the hand satisfied a yaku - merely that it has the shape of a valid hand.
+--
+-- TODO I bet I've missed some valid hands because mahjong is very complicated, but I will add them
+-- if I find them in my research.
+isValidHand :: PlayerState -> Tile -> Bool
+isValidHand player tile = any hasValidStructure (possibleSegmentations player tile)
   where
-    playerMove :: Parsec String () Move
-    playerMove =
-      (char 'R' $> Reject)
-        <|> ( string "K " *> do
-                i <- read <$> many1 digit
-                if i `elem` [1 .. 13]
-                  then
-                    return $ Keep (i - 1)
-                  else
-                    fail "index out of range"
-            )
+    hasValidStructure :: SegmentedHand -> Bool
+    hasValidStructure hand = regularStructure hand || allPairs hand
 
-getPlayerMove :: IO Move
-getPlayerMove = do
-  putStr "Input your move ([R]eject, [K]eep <index of tile to discard, 1-13>): "
-  hFlush stdout
-  move <- parsePlayerMove <$> getLine
-  maybe (putStrLn "Invalid move, try that again." >> getPlayerMove) return move
+    hasStructure :: [Int] -> SegmentedHand -> Bool
+    hasStructure structure = (== structure) . sort . map length
 
-executeKeep :: (Monad m) => Int -> Int -> Tile -> StateT GameState m ()
-executeKeep player i drawn = do
-  hand <- use (hands . element player)
-  let newHand = sort $ hand & element i .~ drawn
-  (hands . element player) .= newHand
+    regularStructure = hasStructure [2, 3, 3, 3, 3]
+    allPairs = hasStructure [2, 2, 2, 2, 2, 2, 2]
 
-executePlayerMove :: (Monad m) => Int -> Move -> StateT GameState m ()
-executePlayerMove player move = do
-  drawn <- head <$> use deck
+-- A hand split up into sets
+type SegmentedHand = [TileSet]
 
-  case move of
-    Keep i -> executeKeep player i drawn
-    _ -> return ()
+type TileSet = [Tile]
 
-  deck %= tail
+-- Returns all the possible ways the player's hand can be split up into tile sets.
+possibleSegmentations :: PlayerState -> Tile -> [SegmentedHand]
+possibleSegmentations player tile = map (callSets ++) (segmentations' (tile : (player ^. hand)))
+  where
+    callSets = map callTiles (player ^. calls)
 
-playerTurn :: StateT GameState IO ()
-playerTurn = do
-  state <- get
-  let handStr = showHand $ head (state ^. hands)
-  lift . putStrLn $ "Your hand: " ++ handStr ++ " " ++ show (head (state ^. deck))
-  move <- lift getPlayerMove
-  executePlayerMove 0 move
+    segmentations' :: [Tile] -> [SegmentedHand]
+    segmentations' hand
+      | null hand = []
+      | otherwise = concatMap (\(set, rest) -> map (set :) (segmentations' rest)) (sets' hand)
 
-gameLoop :: StateT GameState IO ()
-gameLoop = do
-  playerTurn
-  gameLoop
+    -- TODO: takes in a hand and creates a list of all the possible sets in the hand, coupled with
+    -- the tiles left in the hand after that set is extracted
+    sets' :: [Tile] -> [(TileSet, [Tile])]
+    sets' hand
+      | null hand = []
+      | otherwise = undefined
+
+-- A closed hand is one where the player has made no open calls
+handIsClosed :: PlayerState -> Bool
+handIsClosed = not . any (\(Call _ ty) -> ty /= OpenKan) . view calls
+
+tanyao :: Yaku
+tanyao player extra
+  | none isTerminal (extra : player ^. hand) = Just 1
+  | otherwise = Nothing
+
+yakuhai :: Yaku
+yakuhai player extra = undefined
+
+yakus :: [Yaku]
+yakus = [tanyao, yakuhai]
