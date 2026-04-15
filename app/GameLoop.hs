@@ -54,6 +54,7 @@ playerTurn = do
   state <- get
   let handStr = showHand $ state ^. players . element 0 . hand
   lift . putStrLn $ "Your hand: " ++ handStr ++ " " ++ show (head (state ^. deck))
+  lift . print $ possibleSegmentations (state ^?! players . element 0) (head (state ^. deck))
   move <- lift getPlayerMove
   executePlayerMove 0 move
 

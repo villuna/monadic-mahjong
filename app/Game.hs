@@ -98,21 +98,41 @@ type TileSet = [Tile]
 
 -- Returns all the possible ways the player's hand can be split up into tile sets.
 possibleSegmentations :: PlayerState -> Tile -> [SegmentedHand]
-possibleSegmentations player tile = map (callSets ++) (segmentations' (tile : (player ^. hand)))
+possibleSegmentations player tile = map (callSets ++) (segmentationsH (tile : (player ^. hand)))
   where
     callSets = map callTiles (player ^. calls)
 
-    segmentations' :: [Tile] -> [SegmentedHand]
-    segmentations' hand
-      | null hand = []
-      | otherwise = concatMap (\(set, rest) -> map (set :) (segmentations' rest)) (sets' hand)
+    segmentationsH :: [Tile] -> [SegmentedHand]
+    segmentationsH [] = [[]]
+    segmentationsH hand = pairSeg ++ tripleSeg ++ runSeg
+      where
+        sorted = sort hand
 
-    -- TODO: takes in a hand and creates a list of all the possible sets in the hand, coupled with
-    -- the tiles left in the hand after that set is extracted
-    sets' :: [Tile] -> [(TileSet, [Tile])]
-    sets' hand
-      | null hand = []
-      | otherwise = undefined
+        recurseOn :: ([Tile] -> [(TileSet, [Tile])]) -> [SegmentedHand]
+        recurseOn f = concatMap (\(set, rest) -> map (set :) (segmentationsH rest)) $ f sorted
+
+        pairSeg = recurseOn (takeNOfAKind 2)
+        tripleSeg = recurseOn (takeNOfAKind 3)
+        runSeg = recurseOn takeRun
+
+-- Some more helpers for possibleSegmentations that extracts the first of a given set from a hand
+takeNOfAKind :: Int -> [Tile] -> [(TileSet, [Tile])]
+takeNOfAKind n hand
+  | length hand < n = []
+  | otherwise = [splitAt n hand | all (== head hand) (take n hand)]
+
+takeRun :: [Tile] -> [(TileSet, [Tile])]
+takeRun (t1@(Number s r) : xs) =
+  if r >= 8
+    then []
+    else do
+      (t2, rest) <- findAndExtract (Number s (r + 1)) xs
+      (t3, rest) <- findAndExtract (Number s (r + 2)) rest
+      return ([t1, t2, t3], rest)
+  where
+    findAndExtract :: Tile -> [Tile] -> [(Tile, [Tile])]
+    findAndExtract target xs = [(target, delete target xs) | target `elem` xs]
+takeRun _ = []
 
 -- A closed hand is one where the player has made no open calls
 handIsClosed :: PlayerState -> Bool
