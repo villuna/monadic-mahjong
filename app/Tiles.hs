@@ -1,10 +1,10 @@
 module Tiles where
 
-data Suit = Man | Pin | Sou deriving (Ord, Eq)
+data Suit = Man | Pin | Sou deriving (Ord, Eq, Show)
 
-data Colour = Red | Green | White deriving (Ord, Eq)
+data Colour = Red | Green | White deriving (Ord, Eq, Show)
 
-data Direction = North | South | East | West deriving (Ord, Eq)
+data Direction = North | South | East | West deriving (Ord, Eq, Show)
 
 type Rank = Int
 
@@ -43,7 +43,7 @@ showWind dir = case dir of
 
 showDragon :: Colour -> String
 showDragon colour = case colour of
-  Red -> "🀄"
+  Red -> "R" -- My terminal can't render the actual red dragon tile because it's an emoji :/
   Green -> "🀅"
   White -> "🀆"
 

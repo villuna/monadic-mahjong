@@ -3,7 +3,12 @@ module Utils where
 import Control.Monad
 import Data.Array
 import Data.Array.IO
+import Data.List
 import System.Random
+
+listContains :: (Eq a) => [a] -> [a] -> Bool
+listContains [] _ = True
+listContains (x : xs) ys = x `elem` ys && listContains xs (delete x ys)
 
 -- Wrapper for listArray, since I will never need arrays that are not zero indexed by Ints
 listToArray :: [a] -> Array Int a

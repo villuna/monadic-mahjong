@@ -7,7 +7,11 @@ module Game where
 import Control.Lens
 import Control.Monad
 import Control.Monad.State
+import Data.Functor
 import Data.List
+import System.IO
+import System.Random
+import Text.Parsec hiding (State)
 import Tiles
 import Utils
 
@@ -21,18 +25,33 @@ callTiles (Call tiles _) = tiles
 
 data CallType = Pon | Chii | OpenKan | ClosedKan deriving (Eq, Show)
 
+-- Operation that calculates which move the agent (human player or AI) makes on their turn.
+type AgentController = Int -> GameState -> IO Move
+
 data PlayerState = PlayerState
   { _hand :: [Tile],
-    _calls :: [Call]
+    _calls :: [Call],
+    _seatWind :: Direction
   }
   deriving (Show)
+
+-- An extremely bad ai that does moves at random and can expect to lose every game.
+randomMove :: AgentController
+randomMove _ _ = do
+  choice <- randomRIO (0, 13)
+
+  case choice of
+    13 -> return Reject
+    i -> return $ Keep i
 
 -- The state of the game at any given point in time
 data GameState = GameState
   { _deck :: Deck,
-    _players :: [PlayerState]
+    _players :: [PlayerState],
+    _playerControllers :: [AgentController],
+    _prevailingWind :: Direction,
+    _currentPlayer :: Int
   }
-  deriving (Show)
 
 -- Types of moves the player can make on their turn
 -- Either the player can keep the new tile they picked up (discarding the old tile) or reject the
@@ -44,8 +63,8 @@ data Move = Keep Int | Reject deriving (Show)
 makeLenses ''GameState
 makeLenses ''PlayerState
 
-newPlayer :: [Tile] -> PlayerState
-newPlayer hand = PlayerState {_hand = hand, _calls = []}
+newPlayer :: [Tile] -> Direction -> PlayerState
+newPlayer hand seatWind = PlayerState {_hand = hand, _calls = [], _seatWind = seatWind}
 
 -- Draws a hand from the deck. State transformation where the deck is the state
 takeHand :: State Deck Hand
@@ -60,14 +79,22 @@ newGameState :: IO GameState
 newGameState = do
   shuffledDeck <- shuffle baseDeck
   let (hands, deck) = runState (replicateM 4 takeHand) shuffledDeck
-  return GameState {_deck = deck, _players = newPlayer <$> hands}
+  seats <- shuffle [North, East, South, West]
+  return
+    GameState
+      { _deck = deck,
+        _players = zipWith newPlayer hands seats,
+        _playerControllers = playerMove : replicate 3 randomMove,
+        _prevailingWind = East,
+        _currentPlayer = 0
+      }
 
 -- A Yaku is a condition on a hand which gives a certain number of han when satisfied
 -- the number of points may depend on the hand
 --
 -- If the function returns Nothing, the yaku is not satisfied. Otherwise returns the number of han
 -- the function satisfies.
-type Yaku = PlayerState -> Tile -> Maybe Int
+type Yaku = GameState -> PlayerState -> Tile -> Maybe Int
 
 -- Returns if the player is in tenpai - i.e., the player is one tile away from making a hand.
 -- Returns a list of which tiles would complete the players hand.
@@ -134,17 +161,62 @@ takeRun (t1@(Number s r) : xs) =
     findAndExtract target xs = [(target, delete target xs) | target `elem` xs]
 takeRun _ = []
 
+containsSet :: PlayerState -> Tile -> TileSet -> Bool
+containsSet player tile set = listContains set $ tile : (player ^. hand)
+
 -- A closed hand is one where the player has made no open calls
 handIsClosed :: PlayerState -> Bool
 handIsClosed = not . any (\(Call _ ty) -> ty /= OpenKan) . view calls
 
 tanyao :: Yaku
-tanyao player extra
+tanyao _ player extra
   | none isTerminal (extra : player ^. hand) = Just 1
   | otherwise = Nothing
 
+yakuhaiSets :: (Direction, Direction) -> [TileSet]
+yakuhaiSets (prevailing, seat) = winds ++ dragons
+  where
+    winds = [replicate 3 (Wind prevailing), replicate 3 (Wind seat)]
+    dragons = [replicate 3 (Dragon col) | col <- [Red, White, Green]]
+
 yakuhai :: Yaku
-yakuhai player extra = undefined
+yakuhai gameState player extra =
+  if any (containsSet player extra) (yakuhaiSets (gameState ^. prevailingWind, player ^. seatWind))
+    then
+      Just 1
+    else
+      Nothing
 
 yakus :: [Yaku]
 yakus = [tanyao, yakuhai]
+
+parsePlayerMove :: String -> Maybe Move
+parsePlayerMove move = case parse playerMove "" move of
+  Right m -> Just m
+  Left _ -> Nothing
+  where
+    playerMove :: Parsec String () Move
+    playerMove =
+      (char 'R' $> Reject)
+        <|> ( string "K " *> do
+                i <- read <$> many1 digit
+                if i `elem` [1 .. 13]
+                  then
+                    return $ Keep (i - 1)
+                  else
+                    fail "index out of range"
+            )
+
+getPlayerMove :: IO Move
+getPlayerMove = do
+  putStr "Input your move ([R]eject, [K]eep <index of tile to discard, 1-13>): "
+  hFlush stdout
+  move <- parsePlayerMove <$> getLine
+  maybe (putStrLn "Invalid move, try that again." >> getPlayerMove) return move
+
+playerMove :: Int -> GameState -> IO Move
+playerMove player state = do
+  let handStr = showHand $ state ^. players . element player . hand
+  putStrLn $ "Your hand: " ++ handStr ++ " " ++ show (head (state ^. deck))
+  print $ possibleSegmentations (state ^?! players . element player) (head (state ^. deck))
+  getPlayerMove
