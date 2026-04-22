@@ -42,7 +42,7 @@ randomMove _ _ = do
 
   case choice of
     13 -> return Reject
-    i -> return $ Keep i
+    i -> return $ Take i
 
 -- The state of the game at any given point in time
 data GameState = GameState
@@ -58,7 +58,7 @@ data GameState = GameState
 -- tile and not pick it up.
 --
 -- I will add kan and riichi later on
-data Move = Keep Int | Reject deriving (Show)
+data Move = Take Int | Reject | MakeKan Tile deriving (Show)
 
 makeLenses ''GameState
 makeLenses ''PlayerState
@@ -190,33 +190,51 @@ yakuhai gameState player extra =
 yakus :: [Yaku]
 yakus = [tanyao, yakuhai]
 
-parsePlayerMove :: String -> Maybe Move
-parsePlayerMove move = case parse playerMove "" move of
+parsePlayerMove :: [Tile] -> String -> Maybe Move
+parsePlayerMove kanTiles move = case parse playerMove "" move of
   Right m -> Just m
   Left _ -> Nothing
   where
     playerMove :: Parsec String () Move
     playerMove =
       (char 'R' $> Reject)
-        <|> ( string "K " *> do
+        <|> ( string "T " *> do
                 i <- read <$> many1 digit
                 if i `elem` [1 .. 13]
                   then
-                    return $ Keep (i - 1)
+                    return $ Take (i - 1)
+                  else
+                    fail "index out of range"
+            )
+        <|> ( string "K " *> do
+                i <- read <$> many1 digit
+                if i `elem` [1 .. length kanTiles]
+                  then
+                    return $ MakeKan (kanTiles !! (i - 1))
                   else
                     fail "index out of range"
             )
 
-getPlayerMove :: IO Move
-getPlayerMove = do
-  putStr "Input your move ([R]eject, [K]eep <index of tile to discard, 1-13>): "
+-- Returns a list of all the tiles that the player can call Kan on
+kanTiles :: PlayerState -> Tile -> [Tile]
+kanTiles player drawn = filter (containsSet player drawn . replicate 4) (player ^. hand)
+
+getPlayerMove :: [Tile] -> IO Move
+getPlayerMove kanTiles = do
+  putStr "Input your move ([R]eject, [T]ake <index of tile to discard, 1-13>"
+  unless (null kanTiles) $ putStr (", Call [K]an <index of tile to kan: " ++ concatMap show kanTiles ++ ">")
+  putStr "): "
   hFlush stdout
-  move <- parsePlayerMove <$> getLine
-  maybe (putStrLn "Invalid move, try that again." >> getPlayerMove) return move
+  move <- parsePlayerMove kanTiles <$> getLine
+  maybe (putStrLn "Invalid move, try that again." >> getPlayerMove kanTiles) return move
 
 playerMove :: Int -> GameState -> IO Move
 playerMove player state = do
-  let handStr = showHand $ state ^. players . element player . hand
-  putStrLn $ "Your hand: " ++ handStr ++ " " ++ show (head (state ^. deck))
-  print $ possibleSegmentations (state ^?! players . element player) (head (state ^. deck))
-  getPlayerMove
+  let playerState = state ^?! players . element player
+  let drawnTile = head (state ^. deck)
+  let handStr = showHand $ playerState ^. hand
+  putStrLn $ "Your hand: " ++ handStr ++ " " ++ show drawnTile ++ "\t" ++ show (playerState ^. calls)
+
+  -- TODO check for tenpai, yaku etc
+  print $ possibleSegmentations playerState drawnTile
+  getPlayerMove (kanTiles playerState drawnTile)
