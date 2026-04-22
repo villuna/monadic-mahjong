@@ -16,11 +16,15 @@ executePlayerMove :: Int -> Move -> StateT GameState IO ()
 executePlayerMove player move = do
   drawn <- head <$> use deck
 
-  case move of
+  discardedTile <- case move of
     -- The print statements are just here so I can see the AIs are actually doing something
-    Keep i -> lift (putStrLn ("player " ++ show player ++ " played keep " ++ show (i + 1))) >> executeKeep player i drawn
-    _ -> lift . putStrLn $ "player " ++ show player ++ " discarded"
+    Keep i -> do
+      tile <- (!! i) <$> use (players . element player . hand)
+      executeKeep player i drawn
+      return tile
+    _ -> return drawn
 
+  lift . putStrLn $ "Player " ++ show player ++ " discarded tile " ++ show discardedTile
   deck %= tail
 
 playerTurn :: StateT GameState IO ()
